@@ -1,0 +1,59 @@
+# Envoy sits between the ja4-sidecar (TLS terminator + JA4 extractor) and
+# the demo backend. The WASM filter in the HTTP chain is the trust boundary:
+# it strips client-supplied trusted headers, HMAC-signs the sidecar's JA4,
+# and injects X-Detection-JA4 for everything downstream.
+static_resources:
+  listeners:
+    - name: main
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 10000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: backend
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: demo_backend, timeout: 15s }
+                http_filters:
+                  - name: envoy.filters.http.wasm
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+                      config:
+                        name: detection_filter
+                        vm_config:
+                          runtime: envoy.wasm.runtime.v8
+                          code:
+                            local: { filename: /var/lib/wasm/detection_filter.wasm }
+                        # Static key is a scoped demo decision. Production:
+                        # rotating key + `kid` in the signed header.
+                        configuration:
+                          "@type": type.googleapis.com/google.protobuf.StringValue
+                          value: |
+                            {"hmac_key": "demo-static-hmac-key-rotate-in-prod"}
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: demo_backend
+      connect_timeout: 5s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: demo_backend
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: demo-backend, port_value: 9000 }
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }

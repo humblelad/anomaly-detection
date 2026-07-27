@@ -1,0 +1,56 @@
+# One-command demo of the protocol-layer abuse detection pipeline:
+#
+#   client --TLS--> ja4-sidecar --http--> envoy(+wasm) --> demo-backend
+#                       |                     |                |
+#                    computes JA4        signs header    verifies + enforces
+#                                                             |
+#                                                        scoring-service
+#
+# Build the WASM module first (exports envoy/detection_filter.wasm to the
+# host, no toolchain image left behind):
+#   scripts/build_wasm.sh     (or scripts/build_wasm.ps1 on Windows)
+# Then bring the stack up:
+#   docker compose up --build
+# Entry point: https://localhost:8443/login  (self-signed cert, use -k)
+
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.31-latest
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      # The pre-built module is bind-mounted directly; no builder container,
+      # no named volume, no Rust toolchain image at runtime.
+      - ./envoy/detection_filter.wasm:/var/lib/wasm/detection_filter.wasm:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--concurrency", "2"]
+    expose:
+      - "10000"
+    ports:
+      - "9901:9901"  # admin
+
+  ja4-sidecar:
+    build: ./ja4-sidecar
+    depends_on:
+      - envoy
+    environment:
+      LISTEN_ADDR: ":8443"
+      UPSTREAM_ADDR: "envoy:10000"
+    ports:
+      - "8443:8443"  # TLS entry point for all demo clients
+
+  scoring-service:
+    build: ./scoring-service
+    expose:
+      - "9100"
+    ports:
+      - "9100:9100"  # exposed so demo scripts can /seed and /state
+
+  demo-backend:
+    build: ./demo-backend
+    depends_on:
+      - scoring-service
+    environment:
+      HMAC_KEY: "demo-static-hmac-key-rotate-in-prod"
+      SCORING_URL: "http://scoring-service:9100"
+      SHADOW_MODE: "false"
+    expose:
+      - "9000"

@@ -1,0 +1,40 @@
+# Rust
+wasm-filter/target/
+
+# Built WASM artifact (produced by scripts/build_wasm.*)
+envoy/detection_filter.wasm
+
+# Go — compiled binaries only (ja4-sidecar/ja4/ is a source package, keep it)
+/ja4-sidecar/ja4-sidecar
+/ja4-sidecar/*.exe
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / tooling
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# Logs & temp
+*.log
+tmp/
+
+# Docs: keep README.md only
+plan.md
